@@ -312,9 +312,24 @@
     const radio = Math.max(caja.getSize(new v.caja.min.constructor()).length() / 2, 0.5);
     const dir = cam.position.clone().sub(ctl.target).normalize();
     const vfov = ((cam.fov || 50) * Math.PI) / 180, hfov = 2 * Math.atan(Math.tan(vfov / 2) * (cam.aspect || 1));
-    const dist = (radio / Math.sin(Math.min(vfov, hfov) / 2)) * 1.02;
-    cam.position.copy(centro).add(dir.multiplyScalar(dist));
+    let dist = (radio / Math.sin(Math.min(vfov, hfov) / 2)) * 1.02;
     ctl.target.copy(centro);
+    // Ajuste fino: la esfera envolvente deja mucho aire en modelos planos (terrenos, naves); se acerca la
+    // cámara hasta que las 8 esquinas de la caja ocupen ~90 % de la pantalla (importante en celular).
+    const V = v.caja.min.constructor, esquinas = [];
+    for (const x of [caja.min.x, caja.max.x]) for (const y of [caja.min.y, caja.max.y]) for (const z of [caja.min.z, caja.max.z]) esquinas.push(new V(x, y, z));
+    for (let i = 0; i < 4; i++) {
+      cam.position.copy(centro).add(dir.clone().multiplyScalar(dist));
+      cam.lookAt(centro);
+      cam.updateMatrixWorld(true);
+      let ext = 0;
+      for (const e of esquinas) { const p = e.clone().project(cam); if (p.z > 1) { ext = 2; break; } ext = Math.max(ext, Math.abs(p.x), Math.abs(p.y)); }
+      if (!ext) break;
+      const nueva = dist * Math.min(Math.max(ext / 0.9, 0.4), 2.5);
+      if (Math.abs(nueva - dist) < dist * 0.02) break;
+      dist = nueva;
+    }
+    cam.position.copy(centro).add(dir.clone().multiplyScalar(dist));
     ctl.update();
     v.render();
   }
@@ -629,13 +644,28 @@
   body.tb-abierto #barra, body.tb-abierto .panel { left: calc((100vw - var(--tb-ancho, 46vw)) / 2); max-width: calc(100vw - var(--tb-ancho, 46vw) - 16px); }
   body.tb-completo #barra, body.tb-completo .panel:not(#tb-panel), body.tb-completo #cabecera, body.tb-completo #tb-leyenda { display: none !important; }
   @media (max-width: 900px) {
-    #tb-panel { top: auto; left: 0; width: 100%; height: var(--tb-alto, 56vh); border-left: 0; border-top: 1px solid var(--borde); border-radius: 14px 14px 0 0; }
-    body.tb-abierto #lienzo { width: 100%; height: calc(100% - var(--tb-alto, 56vh)); }
-    body.tb-abierto #barra { left: 50%; max-width: calc(100vw - 16px); bottom: calc(var(--tb-alto, 56vh) + 8px); }
-    body.tb-abierto .panel:not(#tb-panel) { left: 50%; max-width: calc(100vw - 16px); bottom: calc(var(--tb-alto, 56vh) + 60px) !important; }
+    #tb-panel { top: auto; left: 0; width: 100%; height: var(--tb-alto, 44vh); border-left: 0; border-top: 1px solid var(--borde); border-radius: 14px 14px 0 0; }
+    body.tb-abierto #lienzo { width: 100%; height: calc(100% - var(--tb-alto, 44vh)); }
+    body.tb-abierto #barra { left: 50%; max-width: calc(100vw - 16px); bottom: calc(var(--tb-alto, 44vh) + 8px); }
+    body.tb-abierto .panel:not(#tb-panel) { left: 50%; max-width: calc(100vw - 16px); bottom: calc(var(--tb-alto, 44vh) + 60px) !important; }
     #tb-tarjetas { grid-template-columns: 1fr; } #tb-ancho-sel { display: none; }
     #tb-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .tb-kpi { padding: 6px 8px; } .tb-kpi b { font-size: 15px; } .tb-kpi b small { display: none; }
     #tb-controles { gap: 6px; padding: 6px 10px; } #tb-cab { padding: 8px 10px; }
+  }
+  #tb-expandir { display: none; }
+  @media (max-width: 900px) {
+    #tb-expandir { display: inline-block; }
+    body.tb-expandido { --tb-alto: 86vh; }
+    #tb-cab h2 { font-size: 14px; } #tb-cab h2 small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tb-controles .tb-lbl { display: none; }
+    #tb-controles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    #tb-controles label, #tb-controles select { width: 100%; min-width: 0; }
+    #tb-controles > span[style] { display: none; }
+    #tb-controles .tb-btn { padding: 5px 6px; font-size: 12px; text-align: center; }
+    #tb-panel select { font-size: 12.5px; padding: 3px 4px; }
+    #tb-cuerpo { padding: 8px; }
+    .tb-card { padding: 8px 8px 6px; } .tb-card h3 { font-size: 12.5px; }
+    #cabecera { padding: 4px 8px; top: 8px; left: 8px; } #cabecera .marca { font-size: 10px; } #titulo { font-size: 12px; }
   }
   @media print { #barra, .panel:not(#tb-panel), #tb-controles, .tb-card header button { display: none !important; } #tb-panel { position: static; width: 100%; } }
   `;
@@ -656,11 +686,12 @@
     <div id="tb-cab">
       <h2>Tableros BIM<small id="tb-resumen"></small></h2>
       <select id="tb-ancho-sel" title="Ancho del tablero"><option value="34">Angosto</option><option value="46" selected>Medio</option><option value="62">Ancho</option><option value="100">Pantalla completa</option></select>
+      <button class="tb-btn icono" id="tb-expandir" title="Agrandar o achicar el tablero" aria-label="Agrandar o achicar el tablero">▲</button>
       <button class="tb-btn icono" id="tb-cerrar" title="Cerrar tableros" aria-label="Cerrar tableros">✕</button>
     </div>
     <div id="tb-controles">
-      <label>Al filtrar <select id="tb-efecto"><option value="atenuar">Atenuar el resto</option><option value="aislar">Aislar</option><option value="nada">No cambiar el 3D</option></select></label>
-      <label>Colorear por <select id="tb-colorear"><option value="">(colores originales)</option></select></label>
+      <label><span class="tb-lbl">Al filtrar</span> <select id="tb-efecto" title="Qué pasa en el modelo al filtrar"><option value="atenuar">Atenuar el resto</option><option value="aislar">Aislar</option><option value="nada">No cambiar el 3D</option></select></label>
+      <label><span class="tb-lbl">Colorear por</span> <select id="tb-colorear" title="Colorear el modelo por un campo"><option value="">(colores originales)</option></select></label>
       <button class="tb-btn" id="tb-seleccionar" title="Clic en el modelo para seleccionar elementos (Ctrl+clic para sumar)">Seleccionar en 3D</button>
       <button class="tb-btn" id="tb-encuadrar" title="Acercar la vista a los elementos filtrados">Encuadrar</button>
       <button class="tb-btn" id="tb-limpiar">Quitar filtros</button>
@@ -688,6 +719,10 @@
     $("tb-agregar").hidden = true;
     $("tb-compartir").hidden = true;
     $("tb-restablecer").hidden = true;
+    // Versión pública: sin exportar datos ni imprimir.
+    $("tb-mas").hidden = true;
+    $("tb-csv").hidden = true;
+    $("tb-imprimir").hidden = true;
   }
 
   // ------------------------------------------------------------------ Render
@@ -935,6 +970,12 @@
   // ------------------------------------------------------------------ Eventos
   boton.addEventListener("click", () => abrir(!estado.abierto));
   $("tb-cerrar").addEventListener("click", () => abrir(false));
+  $("tb-expandir").addEventListener("click", () => {
+    const si = !document.body.classList.contains("tb-expandido");
+    document.body.classList.toggle("tb-expandido", si);
+    $("tb-expandir").textContent = si ? "▼" : "▲";
+    setTimeout(() => { tarjetas(); encuadrar(); }, 250);
+  });
   $("tb-ancho-sel").addEventListener("change", (e) => { estado.ancho = Number(e.target.value); abrir(true); });
   $("tb-efecto").addEventListener("change", (e) => { estado.efecto = e.target.value; restaurarModelo(); actualizar(); });
   $("tb-colorear").addEventListener("change", (e) => { estado.colorear = e.target.value; restaurarModelo(); actualizar(); });
@@ -1048,6 +1089,9 @@
 
   let espera = 0;
   window.addEventListener("resize", () => { clearTimeout(espera); espera = setTimeout(() => { if (estado.abierto) tarjetas(); }, 200); });
+
+  // En la PC (Hub local), el visor también mantiene vivo el servidor mientras está abierto.
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) setInterval(() => { fetch("api/progreso", { cache: "no-store" }).catch(() => {}); }, 60000);
 
   // Abrir solo si la dirección lo pide (?tablero=1), cuando el modelo termine de cargar.
   const esperar = setInterval(() => {
