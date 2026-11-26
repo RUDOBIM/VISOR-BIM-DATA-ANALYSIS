@@ -83,7 +83,7 @@
     if (k === "tipo") return f.tipo;
     if (k === "vinculo") return f.vinculo;
     if (k === "clase") return f.clase;
-    if (k === "__id") return f.id;
+    if (k === "__id" || k === "__ficha") return f.id;
     if (k === "material") return materialDe(f);
     if (k.startsWith("cu:")) return f[k.slice(3)];
     if (k.startsWith("I:")) return f.P ? f.P[k.slice(2)] : undefined;
@@ -614,7 +614,8 @@
   #tb-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .tb-kpi { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 9px 11px; }
   .tb-kpi b { display: block; font-size: 19px; white-space: nowrap; font-weight: 650; color: #0b1220; font-variant-numeric: tabular-nums; }
-  .tb-kpi { position: relative; } .tb-kpi.fija { background: #f8fafc; border-style: dashed; }
+  .tb-kpi { position: relative; } .tb-kpi.clic { cursor: pointer; } .tb-kpi.clic:hover { border-color: #b6d6ff; }
+  .tb-kpi.activa { border-color: var(--acento) !important; background: #eef6ff; box-shadow: 0 0 0 1px var(--acento) inset; } .tb-kpi.activa b { color: var(--acento); } .tb-kpi.fija { background: #f8fafc; border-style: dashed; }
   .tb-kpi-edit { position: absolute; right: 4px; top: 4px; border: 0; background: transparent; color: var(--tenue); cursor: pointer; opacity: 0; padding: 2px 5px; border-radius: 6px; }
   .tb-kpi:hover .tb-kpi-edit { opacity: 1; } .tb-kpi-edit:hover { background: #f1f4f8; }
   .tb-kpi-nueva { font: inherit; color: var(--acento); border: 1px dashed #b6d6ff !important; background: #f7fbff; cursor: pointer; min-height: 58px; }
@@ -770,6 +771,21 @@
     if (estado.cuartos.length) f.push({ titulo: "Cuartos", calculo: "conteo", fuente: "cu" });
     return f.map((x, i) => ({ id: "f" + i + Date.now().toString(36), modo: "dinamica", fuente: "el", ...x }));
   }
+  function filasFicha(fi) {
+    return estado.filas.filter((f) => (!fi.filtroCat || f.cat === fi.filtroCat) && (!fi.filtroTipo || f.tipo === fi.filtroTipo) &&
+      (!fi.filtroMat || materialDe(f) === fi.filtroMat) &&
+      (fi.calculo === "conteo" || fi.calculo === "distintos" || !fi.campo || numDe(valor(f, fi.campo)) !== null));
+  }
+  // Clic en una ficha: filtra el modelo y las gráficas con los elementos que cuenta (otro clic lo quita).
+  function alternarFicha(fi) {
+    if (fi.fuente === "cu") return;
+    if (estado.fichaActiva === fi.id && estado.filtros.has("__ficha")) { estado.filtros.delete("__ficha"); estado.fichaActiva = null; return actualizar(); }
+    const ids = new Set(filasFicha(fi).map((f) => f.id));
+    if (ids.size === estado.filas.length) { estado.filtros.delete("__ficha"); estado.fichaActiva = null; return actualizar(); }
+    estado.filtros.set("__ficha", ids);
+    estado.fichaActiva = fi.id;
+    actualizar();
+  }
   function valorFicha(fi) {
     const cu = fi.fuente === "cu";
     let fs = (cu ? estado.cuartos : estado.filas).filter((f) => cu || ((!fi.filtroCat || f.cat === fi.filtroCat) &&
@@ -804,7 +820,8 @@
       const r = valorFicha(fi);
       const n = r.entero ? fmt0.format(r.n) : fmt.format(r.n);
       const fija = fi.modo === "fija";
-      return `<div class="tb-kpi${fija ? " fija" : ""}" data-fid="${esc(fi.id)}" title="${fija ? "Ficha fija: total del modelo" : "Ficha dinámica: cambia con los filtros y la selección"}">
+      const activa = estado.fichaActiva === fi.id && estado.filtros.has("__ficha");
+      return `<div class="tb-kpi${fija ? " fija" : ""}${activa ? " activa" : ""}${fi.fuente === "cu" ? "" : " clic"}" data-fid="${esc(fi.id)}" title="${fija ? "Ficha fija: total del modelo." : "Ficha dinámica: cambia con los filtros y la selección."}${fi.fuente === "cu" ? "" : " Clic para ver estos elementos en el modelo y las gráficas."}">
         ${soloLectura ? "" : `<button class="tb-kpi-edit" data-fc="editar" aria-label="Editar ficha">✎</button>`}
         <b>${esc(n)}${r.u ? `<small>${esc(r.u)}</small>` : ""}</b><span>${fija ? "📌 " : ""}${esc(fi.titulo || "Ficha")}</span></div>`;
     }).join("") + (soloLectura ? "" : `<button class="tb-kpi tb-kpi-nueva" data-fc="nueva" title="Agregar una ficha">+ Ficha</button>`);
@@ -917,7 +934,7 @@
 
   function filtrosChips() {
     const nombres = (k) => (k === "__id" ? "Elemento" : (k.startsWith("cu:") ? campo(k, "cu") : campo(k)).n);
-    const textoChip = (k, vals) => (k === "__id" ? vals.size + (vals.size === 1 ? " elemento seleccionado" : " elementos seleccionados") : nombres(k) + ": " + corta([...vals].join(", "), 60));
+    const textoChip = (k, vals) => (k === "__ficha" ? "Ficha: " + ((estado.fichas.find((x) => x.id === estado.fichaActiva) || {}).titulo || "") + " (" + vals.size + ")" : k === "__id" ? vals.size + (vals.size === 1 ? " elemento seleccionado" : " elementos seleccionados") : nombres(k) + ": " + corta([...vals].join(", "), 60));
     $("tb-filtros").innerHTML = [...estado.filtros].map(([k, vals]) => `<span class="tb-chip">${esc(textoChip(k, vals))}<button data-quitar="${esc(k)}" aria-label="Quitar filtro">✕</button></span>`).join("");
     $("tb-limpiar").disabled = !estado.filtros.size;
   }
@@ -999,7 +1016,7 @@
   $("tb-efecto").addEventListener("change", (e) => { estado.efecto = e.target.value; restaurarModelo(); actualizar(); });
   $("tb-colorear").addEventListener("change", (e) => { estado.colorear = e.target.value; restaurarModelo(); actualizar(); });
   $("tb-encuadrar").addEventListener("click", encuadrar);
-  $("tb-limpiar").addEventListener("click", () => { estado.filtros.clear(); actualizar(); });
+  $("tb-limpiar").addEventListener("click", () => { estado.filtros.clear(); estado.fichaActiva = null; actualizar(); });
   $("tb-filtros").addEventListener("click", (e) => { const b = e.target.closest("[data-quitar]"); if (b) { estado.filtros.delete(b.dataset.quitar); actualizar(); } });
   $("tb-agregar").addEventListener("click", () => {
     estado.tarjetas.unshift({ id: "t" + Date.now().toString(36), titulo: "Nueva gráfica", tipo: "barras", x: "cat", agg: "suma", top: 10, editando: true });
@@ -1045,7 +1062,13 @@
   });
   $("tb-kpis").addEventListener("click", (e) => {
     const b = e.target.closest("[data-fc]");
-    if (!b || soloLectura) return;
+    if (!b) {
+      const caja = e.target.closest(".tb-kpi[data-fid]");
+      const fi = caja && !caja.classList.contains("editando") && estado.fichas.find((x) => x.id === caja.dataset.fid);
+      if (fi) alternarFicha(fi);
+      return;
+    }
+    if (soloLectura) return;
     const caja = e.target.closest("[data-fid]");
     const fi = caja && estado.fichas.find((x) => x.id === caja.dataset.fid);
     const c = b.dataset.fc;
