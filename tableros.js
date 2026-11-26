@@ -667,6 +667,11 @@
     #tb-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .tb-kpi { padding: 6px 8px; } .tb-kpi b { font-size: 15px; } .tb-kpi b small { display: none; }
     #tb-controles { gap: 6px; padding: 6px 10px; } #tb-cab { padding: 8px 10px; }
   }
+  /* Barra de herramientas del visor junto al tablero: si no cabe, solo íconos */
+  #barra.tb-compacta { gap: 0; padding: 3px; }
+  #barra.tb-compacta button { width: auto; min-width: 38px; flex: 1 1 0; padding: 7px 4px; }
+  #barra.tb-compacta button span { display: none; }
+  #barra.tb-compacta svg { width: 19px; height: 19px; }
   @media (max-width: 900px) {
     html, body.tb-abierto { position: fixed; inset: 0; overflow: hidden; overscroll-behavior: none; }
     #tb-cuerpo { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
@@ -1002,7 +1007,8 @@
     document.documentElement.style.setProperty("--tb-ancho", estado.ancho + "vw");
     if (si) actualizar(); else { restaurarModelo(); leyenda.hidden = true; estado.seleccionando = false; document.body.classList.remove("tb-seleccionando"); $("tb-seleccionar").classList.remove("activo"); $("tb-seleccionar").textContent = "Seleccionar"; }
     // El lienzo 3D cambia de tamaño: se vuelve a encuadrar el modelo cuando termina el cambio.
-    setTimeout(encuadrar, 250);
+    ajustarBarra();
+    setTimeout(() => { ajustarBarra(); encuadrar(); }, 250);
     const p = new URLSearchParams(location.search);
     if (si) p.set("tablero", "1"); else p.delete("tablero");
     history.replaceState(null, "", location.pathname + "?" + p.toString() + location.hash);
@@ -1131,8 +1137,15 @@
     if (campoE !== "titulo") tarjetas(); else e.target.closest(".tb-card").querySelector("h3").textContent = val;
   });
 
+  // Ajusta la barra de herramientas del visor al espacio que deja el tablero.
+  function ajustarBarra() {
+    const b = $("barra");
+    if (!b) return;
+    b.classList.remove("tb-compacta");
+    if (estado.abierto && b.scrollWidth > b.clientWidth + 2) b.classList.add("tb-compacta");
+  }
   let espera = 0;
-  window.addEventListener("resize", () => { clearTimeout(espera); espera = setTimeout(() => { if (estado.abierto) tarjetas(); }, 200); });
+  window.addEventListener("resize", () => { clearTimeout(espera); espera = setTimeout(() => { ajustarBarra(); if (estado.abierto) tarjetas(); }, 200); });
 
   // En la PC (Hub local), el visor también mantiene vivo el servidor mientras está abierto.
   if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) setInterval(() => { fetch("api/progreso", { cache: "no-store" }).catch(() => {}); }, 60000);
