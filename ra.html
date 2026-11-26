@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Realidad aumentada · BIM Loading</title>
+<script>
+  // model-viewer usa el decodificador Draco de este mismo sitio (los modelos "Web comprimido" lo necesitan).
+  self.ModelViewerElement = self.ModelViewerElement || {};
+  self.ModelViewerElement.dracoDecoderLocation = new URL("draco/", location.href).href;
+</script>
+<script type="module" src="vendor/model-viewer.min.js"></script>
+<style>
+  :root { --acento: #0a84ff; --texto: #1c2733; --tenue: #5d6b7c; --borde: #d7dde5; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #eef1f5; }
+  model-viewer::part(default-ar-button) { display: none; }
+  body { font: 14px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; color: var(--texto); }
+  model-viewer { position: fixed; top: 64px; left: 0; right: 0; bottom: 0; width: 100%; height: auto; background: #eef1f5;
+                 --poster-color: transparent; --progress-bar-color: transparent; }
+
+  .flotante { position: fixed; z-index: 3; background: rgba(255,255,255,.92); border: 1px solid var(--borde);
+              border-radius: 12px; box-shadow: 0 6px 22px rgba(16,24,40,.12); }
+  #cabecera { left: 12px; top: 12px; padding: 6px 10px; max-width: calc(100vw - 190px); }
+  .marca { font-weight: 700; letter-spacing: .14em; font-size: 12px; color: #0b1220; }
+  .marca span { color: var(--acento); }
+  #titulo { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #volver { right: 12px; top: 12px; display: flex; align-items: center; gap: 6px; padding: 9px 13px;
+            font: inherit; font-weight: 600; color: var(--texto); text-decoration: none; cursor: pointer; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+  #panel { left: 50%; bottom: 14px; transform: translateX(-50%); width: min(calc(100vw - 20px), 440px); padding: 14px; }
+  #panel h2 { margin: 0 0 8px; font-size: 15px; }
+  .pasos { margin: 0 0 12px; padding-left: 20px; color: var(--tenue); font-size: 13px; }
+  .pasos li { margin: 2px 0; }
+  .pasos b { color: var(--texto); }
+  .btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 14px;
+         border-radius: 12px; border: 0; background: var(--acento); color: #fff; font: inherit; font-size: 15px;
+         font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn.sec { background: #fff; color: var(--texto); border: 1px solid var(--borde); }
+  #estado { margin: 10px 0 0; font-size: 12.5px; color: var(--tenue); text-align: center; min-height: 1em; }
+  #estado.error { color: #a12020; }
+
+  #qr-caja { display: flex; gap: 14px; align-items: center; }
+  #qr { flex: 0 0 auto; width: 132px; height: 132px; background: #fff; border-radius: 8px; padding: 6px; border: 1px solid var(--borde); }
+  #qr img, #qr svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  #qr-caja p { margin: 0; color: var(--tenue); font-size: 13px; }
+  #qr-caja p b { color: var(--texto); }
+
+  #carga { position: fixed; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(70vw, 300px);
+           text-align: center; color: var(--tenue); font-size: 13px; }
+  .progreso { height: 5px; background: #dfe5ec; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  #carga-barra { height: 100%; width: 0; background: var(--acento); transition: width .2s; }
+
+  /* ---------- Menú de ajustes (escala y elevación). En Android va DENTRO de la realidad aumentada. */
+  #ajustes { display: grid; gap: 9px; }
+  .fila { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .fila > .etq { flex: 0 0 74px; font-size: 12.5px; color: var(--tenue); font-weight: 600; }
+  #ajustes select { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--borde);
+                    font: inherit; font-size: 14px; background: #fff; color: var(--texto); }
+  #paso { flex: 0 0 auto !important; }
+  .ctl { min-width: 40px; height: 38px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--borde); background: #fff;
+         font: inherit; font-size: 15px; font-weight: 700; color: var(--texto); cursor: pointer; display: inline-flex;
+         align-items: center; justify-content: center; gap: 5px; }
+  .ctl.peq { font-size: 12.5px; font-weight: 600; }
+  .ctl:disabled { opacity: .45; }
+  #elev-valor { flex: 1; min-width: 86px; text-align: center; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums;
+                padding: 8px 6px; border-radius: 10px; background: #f2f5f9; }
+  #medida { margin: 0; font-size: 12px; color: var(--tenue); }
+  #medida b { color: var(--texto); }
+
+  /* Capa encima de la cámara (WebXR dom-overlay, Android): barra de íconos arriba, sin texto. */
+  #ra-ui { position: fixed; inset: 0; z-index: 10; pointer-events: none; font: 14px/1.4 "Segoe UI", system-ui, Roboto, Arial, sans-serif; color: var(--texto); }
+  #ra-ui .caja { pointer-events: auto; background: rgba(255,255,255,.95); border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,.25); }
+  .redondo { pointer-events: auto; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(40,40,40,.55);
+             color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .redondo svg, .segm svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  #ra-salir { position: absolute; left: 14px; top: 14px; }
+  .segm { pointer-events: auto; position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: flex; gap: 2px;
+          padding: 3px; border-radius: 999px; background: rgba(40,40,40,.55); }
+  .segm button { width: 52px; height: 38px; border: 0; border-radius: 999px; background: transparent; color: #fff;
+                 display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .segm button.activo { background: rgba(255,255,255,.92); color: #1c2733; }
+  #ra-aviso { position: absolute; left: 50%; top: 66px; transform: translateX(-50%); max-width: calc(100vw - 28px); padding: 6px 12px;
+              border-radius: 999px; background: rgba(40,40,40,.6); color: #fff; font-size: 12.5px; text-align: center; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; transition: opacity .4s; }
+  #ra-aviso.oculto { opacity: 0; }
+  #ra-panel { position: absolute; left: 50%; top: 66px; transform: translateX(-50%); width: min(calc(100vw - 20px), 420px); padding: 12px; }
+
+  /* iPhone: el mismo menú en la página, para volver a la vista de RA de Apple ya ajustado. */
+  #ios-ajustes { position: fixed; inset: 0; z-index: 20; background: rgba(15,23,35,.45); display: flex; align-items: flex-end; justify-content: center; }
+  #ios-ajustes .hoja { width: min(100vw, 460px); background: #fff; border-radius: 18px 18px 0 0; padding: 16px 14px 22px; display: grid; gap: 12px; }
+  #ios-ajustes h2 { margin: 0; font-size: 16px; }
+</style>
+</head>
+<body>
+
+<div id="cabecera" class="flotante"><div class="marca">BIM <span>LOADING</span></div><div id="titulo">Realidad aumentada</div></div>
+<a id="volver" class="flotante" href="./" title="Regresar al visor con herramientas">
+  <svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>Volver al visor
+</a>
+
+<model-viewer id="mv" ar ar-modes="webxr scene-viewer quick-look" ar-placement="floor" ar-scale="fixed"
+              camera-controls touch-action="pan-y" shadow-intensity="1" environment-image="neutral"
+              interaction-prompt="none" loading="eager" alt="Modelo 3D de BIM Loading">
+  <button slot="ar-button" hidden></button>
+</model-viewer>
+
+<div id="carga"><div id="carga-texto">Cargando modelo…</div><div class="progreso"><div id="carga-barra"></div></div></div>
+
+<section id="panel" class="flotante" aria-label="Realidad aumentada">
+  <div id="modo-ra">
+    <h2>Ver el modelo en tu espacio</h2>
+    <ol class="pasos">
+      <li>Toca <b>Iniciar realidad aumentada</b> y permite el uso de la cámara.</li>
+      <li>Apunta al <b>piso</b> o a una mesa y mueve el teléfono despacio hasta que reconozca la superficie.</li>
+      <li>El modelo se apoya en su <b>nivel 0</b>, completo. Ya dentro de la realidad aumentada eliges la <b>escala</b> y ajustas la <b>elevación</b> en metros.</li>
+    </ol>
+    <button id="iniciar" class="btn" type="button" disabled>
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/><path d="M4 6.5l8 4.5 8-4.5M12 11v9"/></svg>
+      Iniciar realidad aumentada
+    </button>
+  </div>
+  <div id="modo-qr" hidden>
+    <h2>Abre esta página en tu celular</h2>
+    <div id="qr-caja">
+      <div id="qr" aria-label="Código QR de esta página"></div>
+      <p>Esta computadora no tiene cámara para realidad aumentada. <b>Escanea el código</b> con la cámara de tu iPhone o Android y toca <b>Iniciar realidad aumentada</b>.</p>
+    </div>
+  </div>
+  <p id="estado" role="status"></p>
+</section>
+
+<!-- Menú de escala y elevación (se coloca dentro de la RA en Android, o en la hoja de iPhone) -->
+<div id="ajustes-origen" hidden>
+  <div id="ajustes">
+    <div class="fila">
+      <span class="etq">Escala</span>
+      <select id="escala" aria-label="Escala">
+        <option value="1">Real 1:1</option>
+        <option value="10">1:10</option>
+        <option value="20">1:20</option>
+        <option value="25">1:25</option>
+        <option value="50">1:50</option>
+        <option value="75">1:75</option>
+        <option value="100">1:100</option>
+        <option value="200">1:200</option>
+        <option value="500">1:500</option>
+      </select>
+    </div>
+    <div class="fila">
+      <span class="etq">Elevación</span>
+      <button type="button" class="ctl" id="elev-menos" aria-label="Bajar">−</button>
+      <span id="elev-valor" aria-live="polite">0.00 m</span>
+      <button type="button" class="ctl" id="elev-mas" aria-label="Subir">+</button>
+      <select id="paso" aria-label="Paso de elevación">
+        <option value="0.01">± 0.01 m</option>
+        <option value="0.05">± 0.05 m</option>
+        <option value="0.10" selected>± 0.10 m</option>
+        <option value="0.50">± 0.50 m</option>
+        <option value="1.00">± 1.00 m</option>
+      </select>
+    </div>
+    <div class="fila">
+      <button type="button" class="ctl peq" id="elev-cero">Nivel 0 en el piso</button>
+      <span id="grupo-xr" class="fila" style="gap:6px">
+        <button type="button" class="ctl peq" id="girar-izq" aria-label="Girar a la izquierda">⟲ 15°</button>
+        <button type="button" class="ctl peq" id="girar-der" aria-label="Girar a la derecha">⟳ 15°</button>
+        <button type="button" class="ctl peq" id="recolocar">Recolocar</button>
+      </span>
+    </div>
+    <p id="medida"></p>
+  </div>
+</div>
+
+<!-- Android: capa encima de la cámara durante la RA (solo íconos) -->
+<div id="ra-ui" hidden>
+  <button type="button" class="redondo" id="ra-salir" aria-label="Volver al visor" title="Volver al visor"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div class="segm" role="group" aria-label="Modo">
+    <button type="button" class="activo" id="ra-modo-ar" aria-label="Realidad aumentada" title="Realidad aumentada"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M12 7.5l4 2.2v4.6l-4 2.2-4-2.2V9.7z"/></svg></button>
+    <button type="button" id="ra-modo-obj" aria-label="Objeto" title="Objeto (vista 3D)"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
+    <button type="button" id="ra-ajustes" aria-label="Ajustes: escala y elevación" title="Ajustes: escala y elevación"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </div>
+  <div id="ra-aviso">Apunta al piso y mueve el teléfono despacio…</div>
+  <div id="ra-panel" class="caja" hidden></div>
+</div>
+
+<!-- iPhone: hoja de ajustes que abre el botón dentro de la vista de RA de Apple -->
+<div id="ios-ajustes" hidden>
+  <div class="hoja">
+    <h2>Escala y elevación</h2>
+    <div id="ios-lugar"></div>
+    <button id="ios-volver" class="btn" type="button" disabled>Volver a la realidad aumentada</button>
+    <button id="ios-cerrar" class="btn sec" type="button">Cerrar</button>
+  </div>
+</div>
+
+<script src="vendor/qrcode.js" defer></script>
+<script type="module" src="ra-app.js"></script>
+</body>
+</html>
