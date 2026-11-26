@@ -54,7 +54,7 @@
   const soloLectura = document.documentElement.dataset.version !== "presentacion" &&
     !/^presentaci[oó]n$/i.test(new URLSearchParams(location.search).get("v") || "");
   const estado = {
-    listo: false, abierto: false, filas: [], cuartos: [], campos: new Map(), camposCu: new Map(), modoDatos: "elementos",
+    listo: false, abierto: false, filas: [], cuartos: [], fichas: [], seleccionando: false, porNodo: new Map(), campos: new Map(), camposCu: new Map(), modoDatos: "elementos",
     filtros: new Map(), tarjetas: [], efecto: "atenuar", colorear: "", ancho: 46, niveles: [], proyecto: "", maestro: null
   };
 
@@ -130,6 +130,7 @@
       }
     }
     estado.filas = filas;
+    estado.porNodo = new Map(filas.filter((f) => f.nodo).map((f) => [f.nodo, f]));
 
     // Cuartos: el exportador guarda nombre y caja de cada cuarto (área aproximada = caja en planta).
     estado.cuartos = (Array.isArray(escena.cuartos) ? escena.cuartos : []).map((c, i) => {
@@ -584,6 +585,17 @@
   #tb-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .tb-kpi { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 9px 11px; }
   .tb-kpi b { display: block; font-size: 19px; white-space: nowrap; font-weight: 650; color: #0b1220; font-variant-numeric: tabular-nums; }
+  .tb-kpi { position: relative; } .tb-kpi.fija { background: #f8fafc; border-style: dashed; }
+  .tb-kpi-edit { position: absolute; right: 4px; top: 4px; border: 0; background: transparent; color: var(--tenue); cursor: pointer; opacity: 0; padding: 2px 5px; border-radius: 6px; }
+  .tb-kpi:hover .tb-kpi-edit { opacity: 1; } .tb-kpi-edit:hover { background: #f1f4f8; }
+  .tb-kpi-nueva { font: inherit; color: var(--acento); border: 1px dashed #b6d6ff !important; background: #f7fbff; cursor: pointer; min-height: 58px; }
+  .tb-kpi.editando { grid-column: 1 / -1; padding: 0; border: 0; background: transparent; } .tb-editor-ficha { margin: 0; }
+  #tb-seleccion { background: #fff; border: 1px solid #b6d6ff; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; }
+  #tb-seleccion h3 { margin: 0 0 6px; font-size: 13px; display: flex; gap: 8px; align-items: center; } #tb-seleccion h3 span { flex: 1; }
+  #tb-seleccion dl { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 3px 12px; margin: 0; font-size: 12px; max-height: 220px; overflow: auto; }
+  #tb-seleccion dt { color: var(--tenue); } #tb-seleccion dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .tb-btn.activo { border-color: var(--acento); color: var(--acento); background: #f2f8ff; }
+  body.tb-seleccionando #lienzo { cursor: pointer !important; }
   .tb-kpi span { color: var(--tenue); font-size: 11.5px; } .tb-kpi b small { font-size: 12px; font-weight: 500; color: var(--tenue); margin-left: 3px; }
   #tb-tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
   .tb-card { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 10px 12px 8px; min-width: 0; }
@@ -649,6 +661,7 @@
     <div id="tb-controles">
       <label>Al filtrar <select id="tb-efecto"><option value="atenuar">Atenuar el resto</option><option value="aislar">Aislar</option><option value="nada">No cambiar el 3D</option></select></label>
       <label>Colorear por <select id="tb-colorear"><option value="">(colores originales)</option></select></label>
+      <button class="tb-btn" id="tb-seleccionar" title="Clic en el modelo para seleccionar elementos (Ctrl+clic para sumar)">Seleccionar en 3D</button>
       <button class="tb-btn" id="tb-encuadrar" title="Acercar la vista a los elementos filtrados">Encuadrar</button>
       <button class="tb-btn" id="tb-limpiar">Quitar filtros</button>
       <span style="flex:1"></span>
@@ -656,7 +669,7 @@
       <button class="tb-btn" id="tb-mas" title="Compartir, exportar o restablecer">⋯</button>
     </div>
     <div id="tb-filtros"></div>
-    <div id="tb-cuerpo"><div id="tb-aviso" hidden></div><div id="tb-kpis"></div><div id="tb-tarjetas"></div></div>`;
+    <div id="tb-cuerpo"><div id="tb-aviso" hidden></div><div id="tb-seleccion" hidden></div><div id="tb-kpis"></div><div id="tb-tarjetas"></div></div>`;
   document.body.append(panel);
   const leyenda = document.createElement("div");
   leyenda.id = "tb-leyenda";
@@ -679,30 +692,117 @@
 
   // ------------------------------------------------------------------ Render
   const claveLocal = () => "blg-tableros:" + (new URLSearchParams(location.search).get("m") || location.pathname);
-  function guardar() { if (soloLectura) return; try { localStorage.setItem(claveLocal(), JSON.stringify(estado.tarjetas)); } catch (e) { /* navegador sin almacenamiento */ } }
+  const paquete = () => ({ t: estado.tarjetas.map(({ editando, ...c }) => c), f: estado.fichas.map(({ editando, ...c }) => c) });
+  function guardar() { if (soloLectura) return; try { localStorage.setItem(claveLocal(), JSON.stringify(paquete())); } catch (e) { /* navegador sin almacenamiento */ } }
 
-  function kpis() {
-    const fs = estado.filas.filter((f) => pasa(f, null, "el"));
+  // ------------------------------------------------------------------ Fichas (indicadores)
+  // Cada ficha: { id, titulo, calculo: conteo|distintos|suma|prom|min|max, campo, filtroCat, fuente: el|cu, modo: dinamica|fija }
+  // Dinámica: responde a los filtros y a la selección de elementos. Fija: siempre muestra el total del modelo.
+  const CALCULOS = [["conteo", "Conteo de elementos"], ["distintos", "Valores distintos de…"], ["suma", "Suma de…"], ["prom", "Promedio de…"], ["min", "Mínimo de…"], ["max", "Máximo de…"]];
+  function fichasIniciales() {
     const area = busca(/^I:(Area|Área)$/, true), vol = busca(/^I:(Volume|Volumen)$/, true);
-    const pisos = fs.filter((f) => f.cat === catEs("Floors"));
-    const k = [];
+    const f = [];
     if (estado.modoDatos === "elementos") {
-      k.push([fmt0.format(fs.length), "Elementos"]);
-      k.push([fmt0.format(new Set(fs.map((f) => f.cat)).size), "Categorías"]);
-      k.push([fmt0.format(new Set(fs.map((f) => f.tipo).filter(Boolean)).size), "Tipos"]);
-      k.push([fmt0.format(new Set(fs.map((f) => f.nivel).filter(Boolean)).size), "Niveles"]);
-      if (area && pisos.length) k.push([fmt.format(medida(pisos, area, "suma")) + " m²", "Área de pisos"]);
-      const muros = fs.filter((f) => f.cat === catEs("Walls"));
-      if (area && muros.length) k.push([fmt.format(medida(muros, area, "suma")) + " m²", "Área de muros"]);
-      if (vol) k.push([fmt.format(medida(fs, vol, "suma")) + " m³", "Volumen total"]);
+      f.push({ titulo: "Elementos", calculo: "conteo" });
+      f.push({ titulo: "Categorías", calculo: "distintos", campo: "cat" });
+      f.push({ titulo: "Tipos", calculo: "distintos", campo: "tipo" });
+      f.push({ titulo: "Niveles", calculo: "distintos", campo: "nivel" });
+      if (area) f.push({ titulo: "Área de pisos", calculo: "suma", campo: area, filtroCat: catEs("Floors") });
+      if (area) f.push({ titulo: "Área de muros", calculo: "suma", campo: area, filtroCat: catEs("Walls") });
+      if (vol) f.push({ titulo: "Volumen total", calculo: "suma", campo: vol });
     } else {
-      k.push([fmt0.format(fs.length), "Tipos"]);
-      k.push([fmt0.format(new Set(fs.map((f) => f.cat)).size), "Categorías"]);
-      k.push([fmt0.format(estado.niveles.length), "Niveles"]);
+      f.push({ titulo: "Tipos", calculo: "conteo" });
+      f.push({ titulo: "Categorías", calculo: "distintos", campo: "cat" });
     }
-    if (estado.cuartos.length) k.push([fmt0.format(estado.cuartos.filter((c) => pasa(c, null, "cu")).length), "Cuartos"]);
-    $("tb-kpis").innerHTML = k.map(([b, s]) => { const [n, u] = String(b).split(" "); return `<div class="tb-kpi"><b>${esc(n)}${u ? `<small>${esc(u)}</small>` : ""}</b><span>${esc(s)}</span></div>`; }).join("");
+    if (estado.cuartos.length) f.push({ titulo: "Cuartos", calculo: "conteo", fuente: "cu" });
+    return f.map((x, i) => ({ id: "f" + i + Date.now().toString(36), modo: "dinamica", fuente: "el", ...x }));
   }
+  function valorFicha(fi) {
+    const cu = fi.fuente === "cu";
+    let fs = (cu ? estado.cuartos : estado.filas).filter((f) => cu || !fi.filtroCat || f.cat === fi.filtroCat);
+    if (fi.modo !== "fija") fs = fs.filter((f) => pasa(f, null, cu ? "cu" : "el"));
+    if (fi.calculo === "conteo" || !fi.campo) return { n: fs.length, u: "", entero: true };
+    if (fi.calculo === "distintos") return { n: new Set(fs.map((f) => valor(f, fi.campo)).filter((v) => v !== undefined && v !== null && v !== "")).size, u: "", entero: true };
+    const c = campo(fi.campo, fi.fuente);
+    return { n: medida(fs, fi.campo, fi.calculo), u: c.u || "", entero: false };
+  }
+  function editorFicha(fi) {
+    const cu = fi.fuente === "cu";
+    const cats = [...new Set(estado.filas.map((x) => x.cat))].sort((a, b) => a.localeCompare(b, "es"));
+    const numerico = fi.calculo !== "conteo" && fi.calculo !== "distintos";
+    return `<div class="tb-editor tb-editor-ficha">
+      <label>Título</label><input type="text" data-fe="titulo" value="${esc(fi.titulo)}">
+      ${estado.cuartos.length ? `<label>Datos</label><select data-fe="fuente"><option value="el"${!cu ? " selected" : ""}>Elementos</option><option value="cu"${cu ? " selected" : ""}>Cuartos</option></select>` : ""}
+      <label>Cálculo</label><select data-fe="calculo">${CALCULOS.map(([k, n]) => `<option value="${k}"${k === fi.calculo ? " selected" : ""}>${n}</option>`).join("")}</select>
+      ${fi.calculo !== "conteo" ? `<label>Campo</label><select data-fe="campo">${opcionesCampo(fi.campo, cu ? "cu" : "el", numerico, "(elige un campo)")}</select>` : ""}
+      ${!cu ? `<label>Solo categoría</label><select data-fe="filtroCat"><option value="">(todas)</option>${cats.map((c) => `<option${c === fi.filtroCat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
+      <label>Comportamiento</label><select data-fe="modo"><option value="dinamica"${fi.modo !== "fija" ? " selected" : ""}>Dinámica (cambia con filtros y selección)</option><option value="fija"${fi.modo === "fija" ? " selected" : ""}>Fija (siempre el total del modelo)</option></select>
+      <div class="tb-acc"><button class="tb-btn" data-fc="quitar">Quitar</button><button class="tb-btn lleno" data-fc="listo">Listo</button></div></div>`;
+  }
+  function kpis() {
+    const html = estado.fichas.map((fi) => {
+      if (fi.editando && !soloLectura) return `<div class="tb-kpi editando" data-fid="${esc(fi.id)}">${editorFicha(fi)}</div>`;
+      const r = valorFicha(fi);
+      const n = r.entero ? fmt0.format(r.n) : fmt.format(r.n);
+      const fija = fi.modo === "fija";
+      return `<div class="tb-kpi${fija ? " fija" : ""}" data-fid="${esc(fi.id)}" title="${fija ? "Ficha fija: total del modelo" : "Ficha dinámica: cambia con los filtros y la selección"}">
+        ${soloLectura ? "" : `<button class="tb-kpi-edit" data-fc="editar" aria-label="Editar ficha">✎</button>`}
+        <b>${esc(n)}${r.u ? `<small>${esc(r.u)}</small>` : ""}</b><span>${fija ? "📌 " : ""}${esc(fi.titulo || "Ficha")}</span></div>`;
+    }).join("") + (soloLectura ? "" : `<button class="tb-kpi tb-kpi-nueva" data-fc="nueva" title="Agregar una ficha">+ Ficha</button>`);
+    $("tb-kpis").innerHTML = html;
+  }
+
+  // ------------------------------------------------------------------ Selección de elementos en el modelo 3D
+  const PROPS_CLAVE = /^(Area|Área|Volume|Volumen|Length|Longitud|Width|Ancho|Height|Altura|Thickness|Espesor|Perimeter|Perímetro|Mark|Marca|Comments|Comentarios|Base Constraint|Top Constraint|Unconnected Height|Material|Phase Created|Fase de creación)$/i;
+  function filaDe(obj) {
+    for (let o = obj; o; o = o.parent) { const f = estado.porNodo.get(o); if (f) return f; }
+    return null;
+  }
+  function seleccionar(f, sumar) {
+    let s = estado.filtros.get("__id");
+    if (!sumar) { estado.filtros.delete("__id"); s = null; }
+    if (!f) return actualizar();
+    if (!s) estado.filtros.set("__id", (s = new Set()));
+    s.has(f.id) ? s.delete(f.id) : s.add(f.id);
+    if (!s.size) estado.filtros.delete("__id");
+    actualizar();
+  }
+  function fichaSeleccion() {
+    const caja = $("tb-seleccion");
+    const ids = estado.filtros.get("__id");
+    if (!ids || !ids.size) { caja.hidden = true; return; }
+    caja.hidden = false;
+    const fs = estado.filas.filter((f) => ids.has(f.id));
+    if (fs.length !== 1) {
+      const cats = [...new Set(fs.map((f) => f.cat))];
+      caja.innerHTML = `<h3><span>${fs.length} elementos seleccionados</span><button class="tb-btn" data-sel="limpiar">Quitar selección</button></h3>
+        <dl><dt>Categorías</dt><dd>${esc(cats.join(", "))}</dd><dt>Tipos</dt><dd>${esc(corta([...new Set(fs.map((f) => f.tipo))].join(", "), 300))}</dd></dl>`;
+      return;
+    }
+    const f = fs[0];
+    const filasDl = [["Categoría", f.cat], ["Familia", f.familia], ["Tipo", f.tipo], ["Nivel", f.nivel], ["Modelo / vínculo", f.vinculo], ["ID de Revit", f.nodo && f.nodo.userData.ElementId]];
+    const extra = Object.keys(f.P).filter((k) => PROPS_CLAVE.test(k) && f.P[k] !== "" && f.P[k] != null).map((k) => [k, f.P[k]]);
+    const resto = Object.keys(f.P).filter((k) => !PROPS_CLAVE.test(k) && !IGNORAR.test(k) && f.P[k] !== "" && f.P[k] != null).sort((a, b) => a.localeCompare(b, "es")).map((k) => [k, f.P[k]]);
+    const tipo = Object.keys(f.T).filter((k) => !IGNORAR.test(k) && f.T[k] !== "" && f.T[k] != null).sort((a, b) => a.localeCompare(b, "es")).map((k) => [k + " (tipo)", f.T[k]]);
+    const dl = (lista) => lista.filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    caja.innerHTML = `<h3><span>${esc(f.tipo || f.familia || "Elemento")}</span><button class="tb-btn" data-sel="encuadrar">Encuadrar</button><button class="tb-btn" data-sel="limpiar">Quitar selección</button></h3>
+      <dl>${dl(filasDl)}${dl(extra)}</dl>
+      <details><summary class="tb-sub" style="cursor:pointer;margin-top:6px">Todos los parámetros (${resto.length + tipo.length})</summary><dl>${dl(resto)}${dl(tipo)}</dl></details>`;
+  }
+  // Clic en el lienzo (sin arrastrar) mientras "Seleccionar en 3D" está activo.
+  let inicioClic = null;
+  document.addEventListener("pointerdown", (e) => { if (e.target.id === "lienzo") inicioClic = { x: e.clientX, y: e.clientY, t: Date.now() }; }, true);
+  document.addEventListener("pointerup", (e) => {
+    const v = window.__visor;
+    if (!estado.seleccionando || !estado.abierto || e.target.id !== "lienzo" || !inicioClic || !v || !v.pick) return;
+    const movio = Math.hypot(e.clientX - inicioClic.x, e.clientY - inicioClic.y) > 5 || Date.now() - inicioClic.t > 600;
+    inicioClic = null;
+    if (movio || e.button !== 0) return;
+    // Con "Atenuar" activo, la selección del visor ignora lo atenuado: se escoge sobre lo visible.
+    const hit = v.pick(e.clientX, e.clientY);
+    seleccionar(hit ? filaDe(hit.object) : null, e.ctrlKey || e.metaKey || e.shiftKey);
+  }, true);
+
 
   function opcionesCampo(sel, fuente, soloNum, vacioTxt) {
     const lista = [...(fuente === "cu" ? estado.camposCu : estado.campos).values()].filter((c) => (soloNum ? c.num || c.fecha : true));
@@ -758,7 +858,8 @@
 
   function filtrosChips() {
     const nombres = (k) => (k === "__id" ? "Elemento" : (k.startsWith("cu:") ? campo(k, "cu") : campo(k)).n);
-    $("tb-filtros").innerHTML = [...estado.filtros].map(([k, vals]) => `<span class="tb-chip">${esc(nombres(k))}: ${esc(corta([...vals].join(", "), 60))}<button data-quitar="${esc(k)}" aria-label="Quitar filtro">✕</button></span>`).join("");
+    const textoChip = (k, vals) => (k === "__id" ? vals.size + (vals.size === 1 ? " elemento seleccionado" : " elementos seleccionados") : nombres(k) + ": " + corta([...vals].join(", "), 60));
+    $("tb-filtros").innerHTML = [...estado.filtros].map(([k, vals]) => `<span class="tb-chip">${esc(textoChip(k, vals))}<button data-quitar="${esc(k)}" aria-label="Quitar filtro">✕</button></span>`).join("");
     $("tb-limpiar").disabled = !estado.filtros.size;
   }
 
@@ -771,6 +872,7 @@
   function actualizar() {
     if (!estado.listo) return;
     kpis();
+    fichaSeleccion();
     filtrosChips();
     tarjetas();
     if (estado.efecto !== "nada" || estado.colorear) aplicarModelo(); else restaurarModelo();
@@ -793,11 +895,14 @@
     if (enlace) { try { t = JSON.parse(decodeURIComponent(escape(atob(enlace.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { t = null; } }
     // En la versión pública no se usa un tablero guardado en el navegador: se ve el del enlace o el de BIM Loading.
     if (!t && !soloLectura) { try { t = JSON.parse(localStorage.getItem(claveLocal()) || "null"); } catch (e) { t = null; } }
-    estado.tarjetas = Array.isArray(t) && t.length ? t.map((c) => ({ ...c, editando: false })) : tableroInicial();
+    const tt = Array.isArray(t) ? t : t && t.t, ff = t && !Array.isArray(t) ? t.f : null;
+    estado.tarjetas = Array.isArray(tt) && tt.length ? tt.map((c) => ({ ...c, editando: false })) : tableroInicial();
+    estado.fichas = Array.isArray(ff) && ff.length ? ff.map((c) => ({ ...c, editando: false })) : fichasIniciales();
     $("tb-colorear").innerHTML = '<option value="">(colores originales)</option>' + opcionesCampo("", "el", false);
     $("tb-colorear").disabled = estado.modoDatos !== "elementos";
     $("tb-efecto").disabled = estado.modoDatos !== "elementos";
     $("tb-encuadrar").disabled = estado.modoDatos !== "elementos";
+    $("tb-seleccionar").disabled = estado.modoDatos !== "elementos";
     const aviso = $("tb-aviso");
     if (estado.modoDatos !== "elementos") {
       aviso.hidden = false;
@@ -819,7 +924,7 @@
     document.body.classList.toggle("tb-abierto", si && estado.ancho < 100);
     document.body.classList.toggle("tb-completo", si && estado.ancho >= 100);
     document.documentElement.style.setProperty("--tb-ancho", estado.ancho + "vw");
-    if (si) actualizar(); else { restaurarModelo(); leyenda.hidden = true; }
+    if (si) actualizar(); else { restaurarModelo(); leyenda.hidden = true; estado.seleccionando = false; document.body.classList.remove("tb-seleccionando"); $("tb-seleccionar").classList.remove("activo"); $("tb-seleccionar").textContent = "Seleccionar en 3D"; }
     // El lienzo 3D cambia de tamaño: se vuelve a encuadrar el modelo cuando termina el cambio.
     setTimeout(encuadrar, 250);
     const p = new URLSearchParams(location.search);
@@ -842,10 +947,10 @@
   });
   $("tb-mas").addEventListener("click", () => { menu.hidden = !menu.hidden; });
   document.addEventListener("click", (e) => { if (!menu.hidden && !e.target.closest("#tb-menu") && e.target.id !== "tb-mas") menu.hidden = true; });
-  $("tb-restablecer").addEventListener("click", () => { estado.tarjetas = tableroInicial(); estado.filtros.clear(); guardar(); menu.hidden = true; actualizar(); });
+  $("tb-restablecer").addEventListener("click", () => { estado.tarjetas = tableroInicial(); estado.fichas = fichasIniciales(); estado.filtros.clear(); guardar(); menu.hidden = true; actualizar(); });
   $("tb-imprimir").addEventListener("click", () => { menu.hidden = true; window.print(); });
   $("tb-compartir").addEventListener("click", async () => {
-    const datos = estado.tarjetas.map(({ editando, ...c }) => c);
+    const datos = paquete();
     const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(datos)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const p = new URLSearchParams(location.search); p.set("tb", b64); p.set("tablero", "1"); p.delete("vinc");
     const url = location.origin + location.pathname + "?" + p.toString();
@@ -866,6 +971,41 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   });
 
+  $("tb-seleccionar").addEventListener("click", () => {
+    estado.seleccionando = !estado.seleccionando;
+    $("tb-seleccionar").classList.toggle("activo", estado.seleccionando);
+    document.body.classList.toggle("tb-seleccionando", estado.seleccionando);
+    $("tb-seleccionar").textContent = estado.seleccionando ? "Seleccionando… (clic en el modelo)" : "Seleccionar en 3D";
+  });
+  $("tb-seleccion").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-sel]");
+    if (!b) return;
+    if (b.dataset.sel === "limpiar") { estado.filtros.delete("__id"); actualizar(); }
+    if (b.dataset.sel === "encuadrar") encuadrar();
+  });
+  $("tb-kpis").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-fc]");
+    if (!b || soloLectura) return;
+    const caja = e.target.closest("[data-fid]");
+    const fi = caja && estado.fichas.find((x) => x.id === caja.dataset.fid);
+    const c = b.dataset.fc;
+    if (c === "nueva") estado.fichas.push({ id: "f" + Date.now().toString(36), titulo: "Nueva ficha", calculo: "conteo", fuente: "el", modo: "dinamica", editando: true });
+    if (c === "editar" && fi) fi.editando = true;
+    if (c === "listo" && fi) fi.editando = false;
+    if (c === "quitar" && fi) estado.fichas.splice(estado.fichas.indexOf(fi), 1);
+    guardar(); kpis();
+  });
+  $("tb-kpis").addEventListener("change", (e) => {
+    const k = e.target.dataset.fe;
+    if (!k) return;
+    const fi = estado.fichas.find((x) => x.id === e.target.closest("[data-fid]").dataset.fid);
+    fi[k] = e.target.value;
+    if (k === "fuente") { fi.campo = ""; fi.filtroCat = ""; fi.calculo = "conteo"; }
+    if (k === "calculo" && (fi.calculo === "conteo")) fi.campo = "";
+    if (k === "campo" && (!fi.titulo || fi.titulo === "Nueva ficha")) fi.titulo = (CALCULOS.find(([c]) => c === fi.calculo) || ["", ""])[1].replace("…", "") + " " + campo(fi.campo, fi.fuente).n;
+    guardar();
+    if (k !== "titulo") kpis();
+  });
   $("tb-tarjetas").addEventListener("click", (e) => {
     const sec = e.target.closest(".tb-card");
     if (!sec) return;
