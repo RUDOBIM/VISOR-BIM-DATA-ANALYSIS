@@ -45,7 +45,7 @@
   // ------------------------------------------------------------------ Campos
   const BASE = [
     { k: "cat", n: "Categoría" }, { k: "nivel", n: "Nivel" }, { k: "familia", n: "Familia" }, { k: "tipo", n: "Tipo" },
-    { k: "vinculo", n: "Modelo / vínculo" }, { k: "clase", n: "Clase de familia" }
+    { k: "vinculo", n: "Modelo / vínculo" }, { k: "clase", n: "Clase de familia" }, { k: "material", n: "Material" }
   ];
   const CUARTOS = [{ k: "cu:nombre", n: "Cuarto" }, { k: "nivel", n: "Nivel" }, { k: "cu:area", n: "Área aprox. (m²)", num: true, u: "m²" }, { k: "cu:altura", n: "Altura (m)", num: true, u: "m" }];
   const IGNORAR = /(IfcGUID|UniqueId|GUID|Type Id|Element ?Id|Host Id|^Image$|Type Image|URL|Email|Design Option|Export (Type )?to IFC|Phase Demolished|Coarse Scale Fill|Count$)/i;
@@ -84,10 +84,24 @@
     if (k === "vinculo") return f.vinculo;
     if (k === "clase") return f.clase;
     if (k === "__id") return f.id;
+    if (k === "material") return materialDe(f);
     if (k.startsWith("cu:")) return f[k.slice(3)];
     if (k.startsWith("I:")) return f.P ? f.P[k.slice(2)] : undefined;
     if (k.startsWith("T:")) return f.T ? f.T[k.slice(2)] : undefined;
     return undefined;
+  }
+  // Material de un elemento: parámetro de ejemplar y, si no tiene, el de su tipo (estructural, cuerpo, etc.).
+  const CLAVES_MATERIAL = ["Material", "Structural Material", "Material estructural", "Material de estructura", "Body Material", "Material del cuerpo", "Materiales"];
+  function materialDe(f) {
+    if (!f || f.material !== undefined) return f ? f.material : "";
+    let m = "";
+    for (const src of [f.P, f.T]) {
+      if (!src) continue;
+      for (const k of CLAVES_MATERIAL) { const v = src[k]; if (v !== undefined && v !== null && String(v).trim() && !/^(<|\(|-1$)/.test(String(v))) { m = String(v).trim(); break; } }
+      if (m) break;
+    }
+    f.material = m;
+    return m;
   }
   const texto = (v) => (v === undefined || v === null || v === "") ? "(vacío)" : String(v);
 
@@ -758,13 +772,17 @@
   }
   function valorFicha(fi) {
     const cu = fi.fuente === "cu";
-    let fs = (cu ? estado.cuartos : estado.filas).filter((f) => cu || !fi.filtroCat || f.cat === fi.filtroCat);
+    let fs = (cu ? estado.cuartos : estado.filas).filter((f) => cu || ((!fi.filtroCat || f.cat === fi.filtroCat) &&
+      (!fi.filtroTipo || f.tipo === fi.filtroTipo) && (!fi.filtroMat || materialDe(f) === fi.filtroMat)));
     if (fi.modo !== "fija") fs = fs.filter((f) => pasa(f, null, cu ? "cu" : "el"));
     if (fi.calculo === "conteo" || !fi.campo) return { n: fs.length, u: "", entero: true };
     if (fi.calculo === "distintos") return { n: new Set(fs.map((f) => valor(f, fi.campo)).filter((v) => v !== undefined && v !== null && v !== "")).size, u: "", entero: true };
     const c = campo(fi.campo, fi.fuente);
     return { n: medida(fs, fi.campo, fi.calculo), u: c.u || "", entero: false };
   }
+  const ordenEs = (a, b) => a.localeCompare(b, "es", { numeric: true });
+  const tiposDe = (cat) => [...new Set(estado.filas.filter((f) => !cat || f.cat === cat).map((f) => f.tipo).filter(Boolean))].sort(ordenEs);
+  const materialesDe = (cat, tipo) => [...new Set(estado.filas.filter((f) => (!cat || f.cat === cat) && (!tipo || f.tipo === tipo)).map(materialDe).filter(Boolean))].sort(ordenEs);
   function editorFicha(fi) {
     const cu = fi.fuente === "cu";
     const cats = [...new Set(estado.filas.map((x) => x.cat))].sort((a, b) => a.localeCompare(b, "es"));
@@ -774,7 +792,9 @@
       ${estado.cuartos.length ? `<label>Datos</label><select data-fe="fuente"><option value="el"${!cu ? " selected" : ""}>Elementos</option><option value="cu"${cu ? " selected" : ""}>Cuartos</option></select>` : ""}
       <label>Cálculo</label><select data-fe="calculo">${CALCULOS.map(([k, n]) => `<option value="${k}"${k === fi.calculo ? " selected" : ""}>${n}</option>`).join("")}</select>
       ${fi.calculo !== "conteo" ? `<label>Campo</label><select data-fe="campo">${opcionesCampo(fi.campo, cu ? "cu" : "el", numerico, "(elige un campo)")}</select>` : ""}
-      ${!cu ? `<label>Solo categoría</label><select data-fe="filtroCat"><option value="">(todas)</option>${cats.map((c) => `<option${c === fi.filtroCat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
+      ${!cu ? `<label>Categoría</label><select data-fe="filtroCat"><option value="">(todas)</option>${cats.map((c) => `<option${c === fi.filtroCat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
+      ${!cu ? `<label>Tipo</label><select data-fe="filtroTipo"><option value="">(todos)</option>${tiposDe(fi.filtroCat).map((c) => `<option${c === fi.filtroTipo ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
+      ${!cu ? `<label>Material</label><select data-fe="filtroMat"><option value="">${materialesDe(fi.filtroCat, fi.filtroTipo).length ? "(todos)" : "(el modelo no trae materiales)"}</option>${materialesDe(fi.filtroCat, fi.filtroTipo).map((c) => `<option${c === fi.filtroMat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
       <label>Comportamiento</label><select data-fe="modo"><option value="dinamica"${fi.modo !== "fija" ? " selected" : ""}>Dinámica (cambia con filtros y selección)</option><option value="fija"${fi.modo === "fija" ? " selected" : ""}>Fija (siempre el total del modelo)</option></select>
       <div class="tb-acc"><button class="tb-btn" data-fc="quitar">Quitar</button><button class="tb-btn lleno" data-fc="listo">Listo</button></div></div>`;
   }
@@ -866,7 +886,7 @@
       <label>Medida</label><select data-e="y">${opcionesCampo(card.y, f, true, "Conteo de elementos")}</select>
       <label>Cálculo</label><select data-e="agg">${[["suma", "Suma"], ["prom", "Promedio"], ["min", "Mínimo"], ["max", "Máximo"]].map(([k, n]) => `<option value="${k}"${k === card.agg ? " selected" : ""}>${n}</option>`).join("")}</select>
       <label>Medida 2</label><select data-e="y2">${opcionesCampo(card.y2, f, true, "(dispersión, burbujas y Gantt)")}</select>
-      ${f === "el" ? `<label>Solo categoría</label><select data-e="filtroCat"><option value="">(todas)</option>${cats.map((c) => `<option${c === card.filtroCat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
+      ${f === "el" ? `<label>Categoría</label><select data-e="filtroCat"><option value="">(todas)</option>${cats.map((c) => `<option${c === card.filtroCat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>` : ""}
       <label>Mostrar</label><select data-e="top">${[[0, "Todos"], [5, "Top 5"], [8, "Top 8"], [10, "Top 10"], [12, "Top 12"], [15, "Top 15"], [20, "Top 20"], [30, "Top 30"]].map(([k, n]) => `<option value="${k}"${Number(card.top) === k ? " selected" : ""}>${n}</option>`).join("")}</select>
       <label>Orden</label><select data-e="orden"><option value="valor"${card.orden !== "nombre" ? " selected" : ""}>Por valor</option><option value="nombre"${card.orden === "nombre" ? " selected" : ""}>Por nombre</option></select>
       <label>Tamaño</label><select data-e="ancha"><option value="">Normal</option><option value="1"${card.ancha ? " selected" : ""}>Ancho completo</option></select>
@@ -1040,7 +1060,9 @@
     if (!k) return;
     const fi = estado.fichas.find((x) => x.id === e.target.closest("[data-fid]").dataset.fid);
     fi[k] = e.target.value;
-    if (k === "fuente") { fi.campo = ""; fi.filtroCat = ""; fi.calculo = "conteo"; }
+    if (k === "fuente") { fi.campo = ""; fi.filtroCat = ""; fi.filtroTipo = ""; fi.filtroMat = ""; fi.calculo = "conteo"; }
+    if (k === "filtroCat") { if (fi.filtroTipo && !tiposDe(fi.filtroCat).includes(fi.filtroTipo)) fi.filtroTipo = ""; if (fi.filtroMat && !materialesDe(fi.filtroCat, fi.filtroTipo).includes(fi.filtroMat)) fi.filtroMat = ""; }
+    if (k === "filtroTipo" && fi.filtroMat && !materialesDe(fi.filtroCat, fi.filtroTipo).includes(fi.filtroMat)) fi.filtroMat = "";
     if (k === "calculo" && (fi.calculo === "conteo")) fi.campo = "";
     if (k === "campo" && (!fi.titulo || fi.titulo === "Nueva ficha")) fi.titulo = (CALCULOS.find(([c]) => c === fi.calculo) || ["", ""])[1].replace("…", "") + " " + campo(fi.campo, fi.fuente).n;
     guardar();
