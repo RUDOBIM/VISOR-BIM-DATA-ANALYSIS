@@ -1,16 +1,4 @@
 {
- "actualizado": "2026-11-26T04:36:57.154Z",
- "modelos": [
-  {
-   "nombre": "001-COR-PCQ-BIM-A-DEPORTIVO-QUINTIN-ARAUZ",
-   "proyecto": "QUINTIN-ARAUZ",
-   "tipo": "Completo",
-   "ruta": "modelos/quintin-arauz--001-cor-pcq-bim-a-deportivo-quintin-arauz.glb",
-   "miniatura": "miniaturas/quintin-arauz--001-cor-pcq-bim-a-deportivo-quintin-arauz.jpg",
-   "usdz": "modelos/quintin-arauz--001-cor-pcq-bim-a-deportivo-quintin-arauz.usdz",
-   "ra": "modelos/quintin-arauz--001-cor-pcq-bim-a-deportivo-quintin-arauz.ra.glb",
-   "bytes": 3715472,
-   "fecha": "2026-11-26T04:36:57.153Z"
-  }
- ]
+ "actualizado": "2026-11-26T04:48:44.601Z",
+ "modelos": []
 }
