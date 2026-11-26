@@ -50,6 +50,9 @@
   const CUARTOS = [{ k: "cu:nombre", n: "Cuarto" }, { k: "nivel", n: "Nivel" }, { k: "cu:area", n: "Área aprox. (m²)", num: true, u: "m²" }, { k: "cu:altura", n: "Altura (m)", num: true, u: "m" }];
   const IGNORAR = /(IfcGUID|UniqueId|GUID|Type Id|Element ?Id|Host Id|^Image$|Type Image|URL|Email|Design Option|Export (Type )?to IFC|Phase Demolished|Coarse Scale Fill|Count$)/i;
 
+  // Versión PÚBLICA del visor (sin ?v=presentacion): el tablero se ve y se filtra, pero no se edita.
+  const soloLectura = document.documentElement.dataset.version !== "presentacion" &&
+    !/^presentaci[oó]n$/i.test(new URLSearchParams(location.search).get("v") || "");
   const estado = {
     listo: false, abierto: false, filas: [], cuartos: [], campos: new Map(), camposCu: new Map(), modoDatos: "elementos",
     filtros: new Map(), tarjetas: [], efecto: "atenuar", colorear: "", ancho: 46, niveles: [], proyecto: "", maestro: null
@@ -668,10 +671,15 @@
   menu.innerHTML = `<button id="tb-compartir">Copiar enlace con este tablero</button><button id="tb-csv">Descargar datos (CSV)</button>
     <button id="tb-imprimir">Imprimir / guardar PDF</button><button id="tb-restablecer">Restablecer tablero por defecto</button>`;
   document.body.append(menu);
+  if (soloLectura) {
+    $("tb-agregar").hidden = true;
+    $("tb-compartir").hidden = true;
+    $("tb-restablecer").hidden = true;
+  }
 
   // ------------------------------------------------------------------ Render
   const claveLocal = () => "blg-tableros:" + (new URLSearchParams(location.search).get("m") || location.pathname);
-  function guardar() { try { localStorage.setItem(claveLocal(), JSON.stringify(estado.tarjetas)); } catch (e) { /* navegador sin almacenamiento */ } }
+  function guardar() { if (soloLectura) return; try { localStorage.setItem(claveLocal(), JSON.stringify(estado.tarjetas)); } catch (e) { /* navegador sin almacenamiento */ } }
 
   function kpis() {
     const fs = estado.filas.filter((f) => pasa(f, null, "el"));
@@ -684,6 +692,8 @@
       k.push([fmt0.format(new Set(fs.map((f) => f.tipo).filter(Boolean)).size), "Tipos"]);
       k.push([fmt0.format(new Set(fs.map((f) => f.nivel).filter(Boolean)).size), "Niveles"]);
       if (area && pisos.length) k.push([fmt.format(medida(pisos, area, "suma")) + " m²", "Área de pisos"]);
+      const muros = fs.filter((f) => f.cat === catEs("Walls"));
+      if (area && muros.length) k.push([fmt.format(medida(muros, area, "suma")) + " m²", "Área de muros"]);
       if (vol) k.push([fmt.format(medida(fs, vol, "suma")) + " m³", "Volumen total"]);
     } else {
       k.push([fmt0.format(fs.length), "Tipos"]);
@@ -739,10 +749,10 @@
         cuerpo = (DIBUJO[card.tipo] || DIBUJO.barras)(card, fs);
       } catch (e) { console.error(e); cuerpo = vacio("No se pudo dibujar esta gráfica: " + e.message); }
       const sub = [card.x ? campo(card.x, card.fuente).n : "", card.tipo === "histograma" ? "" : nombreMedida(card), card.filtroCat ? "solo " + card.filtroCat : ""].filter(Boolean).join(" · ");
-      el.innerHTML = `<header><h3 title="${esc(card.titulo)}">${esc(card.titulo || "Gráfica")}</h3>
+      el.innerHTML = `<header><h3 title="${esc(card.titulo)}">${esc(card.titulo || "Gráfica")}</h3>${soloLectura ? "" : `
         <button data-c="editar" title="Editar gráfica" aria-label="Editar">✎</button><button data-c="ancha" title="Ancho normal / completo" aria-label="Cambiar tamaño">⤢</button>
-        <button data-c="subir" title="Mover antes" aria-label="Mover antes">↑</button><button data-c="quitar" title="Quitar gráfica" aria-label="Quitar">✕</button></header>
-        ${card.editando ? editor(card) : ""}<div class="tb-sub">${esc(sub)}</div><div class="${card.tipo === "tabla" ? "tb-scroll" : ""}">${cuerpo}</div>`;
+        <button data-c="subir" title="Mover antes" aria-label="Mover antes">↑</button><button data-c="quitar" title="Quitar gráfica" aria-label="Quitar">✕</button>`}</header>
+        ${card.editando && !soloLectura ? editor(card) : ""}<div class="tb-sub">${esc(sub)}</div><div class="${card.tipo === "tabla" ? "tb-scroll" : ""}">${cuerpo}</div>`;
     }
   }
 
@@ -781,7 +791,8 @@
     let t = null;
     const enlace = new URLSearchParams(location.search).get("tb");
     if (enlace) { try { t = JSON.parse(decodeURIComponent(escape(atob(enlace.replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { t = null; } }
-    if (!t) { try { t = JSON.parse(localStorage.getItem(claveLocal()) || "null"); } catch (e) { t = null; } }
+    // En la versión pública no se usa un tablero guardado en el navegador: se ve el del enlace o el de BIM Loading.
+    if (!t && !soloLectura) { try { t = JSON.parse(localStorage.getItem(claveLocal()) || "null"); } catch (e) { t = null; } }
     estado.tarjetas = Array.isArray(t) && t.length ? t.map((c) => ({ ...c, editando: false })) : tableroInicial();
     $("tb-colorear").innerHTML = '<option value="">(colores originales)</option>' + opcionesCampo("", "el", false);
     $("tb-colorear").disabled = estado.modoDatos !== "elementos";
@@ -860,6 +871,7 @@
     if (!sec) return;
     const card = estado.tarjetas.find((c) => c.id === sec.dataset.id);
     const accion = e.target.closest("[data-c]");
+    if (accion && soloLectura) return;
     if (accion) {
       const c = accion.dataset.c, i = estado.tarjetas.indexOf(card);
       if (c === "editar") card.editando = !card.editando;
