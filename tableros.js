@@ -652,18 +652,23 @@
     #tb-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .tb-kpi { padding: 6px 8px; } .tb-kpi b { font-size: 15px; } .tb-kpi b small { display: none; }
     #tb-controles { gap: 6px; padding: 6px 10px; } #tb-cab { padding: 8px 10px; }
   }
-  #tb-expandir { display: none; }
   @media (max-width: 900px) {
-    #tb-expandir { display: inline-block; }
-    body.tb-expandido { --tb-alto: 86vh; }
-    #tb-cab h2 { font-size: 14px; } #tb-cab h2 small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #tb-controles .tb-lbl { display: none; }
-    #tb-controles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    #tb-controles label, #tb-controles select { width: 100%; min-width: 0; }
-    #tb-controles > span[style] { display: none; }
-    #tb-controles .tb-btn { padding: 5px 6px; font-size: 12px; text-align: center; }
-    #tb-panel select { font-size: 12.5px; padding: 3px 4px; }
-    #tb-cuerpo { padding: 8px; }
+    html, body.tb-abierto { position: fixed; inset: 0; overflow: hidden; overscroll-behavior: none; }
+    #tb-cuerpo { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    #tb-cab { padding: 6px 10px; gap: 6px; flex-wrap: nowrap; }
+    #tb-cab h2 { font-size: 13px; min-width: 0; } #tb-cab h2 small { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tb-cab .tb-btn.icono { padding: 2px 8px; }
+    #tb-controles .tb-lbl, #tb-controles > span[style] { display: none; }
+    #tb-controles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 5px 8px; }
+    #tb-controles label { grid-column: span 3; width: 100%; min-width: 0; }
+    #tb-controles select { width: 100%; min-width: 0; font-size: 12px; padding: 2px 4px; height: 28px; }
+    #tb-controles .tb-btn { grid-column: span 2; padding: 3px 4px; font-size: 11.5px; text-align: center; height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tb-controles #tb-agregar, #tb-controles #tb-mas { grid-column: span 3; }
+    #tb-filtros:not(:empty) { padding: 5px 8px 0; }
+    #tb-cuerpo { padding: 6px 8px; }
+    #tb-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-bottom: 8px; }
+    .tb-kpi { padding: 4px 6px; border-radius: 8px; } .tb-kpi b { font-size: 13px; } .tb-kpi span { font-size: 9.5px; line-height: 1.15; display: block; }
+    .tb-kpi b small { display: none; } .tb-kpi-nueva { min-height: 0; font-size: 11px; }
     .tb-card { padding: 8px 8px 6px; } .tb-card h3 { font-size: 12.5px; }
     #cabecera { padding: 4px 8px; top: 8px; left: 8px; } #cabecera .marca { font-size: 10px; } #titulo { font-size: 12px; }
   }
@@ -686,13 +691,12 @@
     <div id="tb-cab">
       <h2>Tableros BIM<small id="tb-resumen"></small></h2>
       <select id="tb-ancho-sel" title="Ancho del tablero"><option value="34">Angosto</option><option value="46" selected>Medio</option><option value="62">Ancho</option><option value="100">Pantalla completa</option></select>
-      <button class="tb-btn icono" id="tb-expandir" title="Agrandar o achicar el tablero" aria-label="Agrandar o achicar el tablero">▲</button>
       <button class="tb-btn icono" id="tb-cerrar" title="Cerrar tableros" aria-label="Cerrar tableros">✕</button>
     </div>
     <div id="tb-controles">
       <label><span class="tb-lbl">Al filtrar</span> <select id="tb-efecto" title="Qué pasa en el modelo al filtrar"><option value="atenuar">Atenuar el resto</option><option value="aislar">Aislar</option><option value="nada">No cambiar el 3D</option></select></label>
       <label><span class="tb-lbl">Colorear por</span> <select id="tb-colorear" title="Colorear el modelo por un campo"><option value="">(colores originales)</option></select></label>
-      <button class="tb-btn" id="tb-seleccionar" title="Clic en el modelo para seleccionar elementos (Ctrl+clic para sumar)">Seleccionar en 3D</button>
+      <button class="tb-btn" id="tb-seleccionar" title="Seleccionar en 3D: clic en el modelo para elegir elementos (Ctrl+clic para sumar)">Seleccionar</button>
       <button class="tb-btn" id="tb-encuadrar" title="Acercar la vista a los elementos filtrados">Encuadrar</button>
       <button class="tb-btn" id="tb-limpiar">Quitar filtros</button>
       <span style="flex:1"></span>
@@ -959,7 +963,7 @@
     document.body.classList.toggle("tb-abierto", si && estado.ancho < 100);
     document.body.classList.toggle("tb-completo", si && estado.ancho >= 100);
     document.documentElement.style.setProperty("--tb-ancho", estado.ancho + "vw");
-    if (si) actualizar(); else { restaurarModelo(); leyenda.hidden = true; estado.seleccionando = false; document.body.classList.remove("tb-seleccionando"); $("tb-seleccionar").classList.remove("activo"); $("tb-seleccionar").textContent = "Seleccionar en 3D"; }
+    if (si) actualizar(); else { restaurarModelo(); leyenda.hidden = true; estado.seleccionando = false; document.body.classList.remove("tb-seleccionando"); $("tb-seleccionar").classList.remove("activo"); $("tb-seleccionar").textContent = "Seleccionar"; }
     // El lienzo 3D cambia de tamaño: se vuelve a encuadrar el modelo cuando termina el cambio.
     setTimeout(encuadrar, 250);
     const p = new URLSearchParams(location.search);
@@ -970,12 +974,7 @@
   // ------------------------------------------------------------------ Eventos
   boton.addEventListener("click", () => abrir(!estado.abierto));
   $("tb-cerrar").addEventListener("click", () => abrir(false));
-  $("tb-expandir").addEventListener("click", () => {
-    const si = !document.body.classList.contains("tb-expandido");
-    document.body.classList.toggle("tb-expandido", si);
-    $("tb-expandir").textContent = si ? "▼" : "▲";
-    setTimeout(() => { tarjetas(); encuadrar(); }, 250);
-  });
+
   $("tb-ancho-sel").addEventListener("change", (e) => { estado.ancho = Number(e.target.value); abrir(true); });
   $("tb-efecto").addEventListener("change", (e) => { estado.efecto = e.target.value; restaurarModelo(); actualizar(); });
   $("tb-colorear").addEventListener("change", (e) => { estado.colorear = e.target.value; restaurarModelo(); actualizar(); });
@@ -1016,7 +1015,7 @@
     estado.seleccionando = !estado.seleccionando;
     $("tb-seleccionar").classList.toggle("activo", estado.seleccionando);
     document.body.classList.toggle("tb-seleccionando", estado.seleccionando);
-    $("tb-seleccionar").textContent = estado.seleccionando ? "Seleccionando… (clic en el modelo)" : "Seleccionar en 3D";
+    $("tb-seleccionar").textContent = estado.seleccionando ? "Seleccionando…" : "Seleccionar";
   });
   $("tb-seleccion").addEventListener("click", (e) => {
     const b = e.target.closest("[data-sel]");
